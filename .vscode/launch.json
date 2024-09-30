@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Spring Boot-CoursemateApplication<coursemate>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.intern.coursemate.CoursemateApplication",
+            "projectName": "coursemate",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}

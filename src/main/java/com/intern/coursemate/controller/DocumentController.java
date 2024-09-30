@@ -60,7 +60,7 @@ public class DocumentController {
         // Handle the file upload
         String fileName = documentService.uploadFile(file);
         String fileUrl = "https://rguktcoursemate.s3.eu-north-1.amazonaws.com/" + fileName;
-        Document document = Document.builder().name(fileName).isVerified(false).sem(documentRequest.getSem()).year(documentRequest.getYear()).subject(documentRequest.getSubject()).url(fileUrl).build();
+        Document document = Document.builder().name(fileName).sem(documentRequest.getSem()).year(documentRequest.getYear()).subject(documentRequest.getSubject()).url(fileUrl).build();
         documentRespositry.save(document);
         emailService.send("n200072@rguktn.ac.in",buildDocumentEmail(fileName, fileUrl, "http://localhost:8080/docs/verify?id="+document.getId() , "http://localhost:8080/docs/reject?id="+document.getId()+"&name="+fileName), "Verify document");
         return new ResponseEntity<>(fileUrl, HttpStatus.OK);

@@ -18,8 +18,8 @@ public class StudentController {
     private  StudentService studentService;
 
     @GetMapping("/login")
-    public String login(@RequestParam String param) {
-        return new String();
+    public String login(@RequestParam("code") String code, @RequestParam("scope") String scope, @RequestParam("authuser") String authUser, @RequestParam("prompt") String prompt) {
+        return "login";
     }
     
 }

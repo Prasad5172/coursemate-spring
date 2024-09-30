@@ -31,9 +31,6 @@ public class Student {
     private String name;
     @Column(nullable = false)
     private String email;
-    private String password;
-    @Default
-    private Boolean isVerified = false;
     @Default
     private Boolean isAdmin = false;
     @OneToMany(mappedBy = "student")
