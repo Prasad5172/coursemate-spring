@@ -30,8 +30,8 @@ public class Document {
     private String year;
     private int sem;
     @ManyToOne
-    @JoinColumn(name = "student_id")
-    private Student student;
+    @JoinColumn(name = "user_id")
+    private User user;
     private boolean isVerified;
     private String url;
 }

@@ -24,14 +24,11 @@ import com.amazonaws.AmazonServiceException;
 import com.amazonaws.SdkClientException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intern.coursemate.dao.DocumentRepository;
-import com.intern.coursemate.dto.FileUploadResponse;
 import com.intern.coursemate.email.EmailService;
 import com.intern.coursemate.model.Document;
 import com.intern.coursemate.request.DocumentRequest;
-import com.intern.coursemate.request.DocumentVerificationRequest;
 import com.intern.coursemate.service.DocumentService;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @RestController
@@ -141,6 +138,7 @@ public class DocumentController {
                 "<p>Your Company</p>\n" +
                 "</div>";
     }
+    
     
     
 
