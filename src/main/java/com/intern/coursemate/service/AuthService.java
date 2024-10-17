@@ -20,6 +20,8 @@ import com.intern.coursemate.dto.VerifyDto;
 import com.intern.coursemate.email.EmailService;
 import com.intern.coursemate.model.User;
 
+import reactor.core.publisher.Mono;
+
 import java.util.*;
 @Service
 public class AuthService {
@@ -34,7 +36,7 @@ public class AuthService {
     @Autowired
     private AuthenticationManager authenticationManager;
     
-    public Optional<User> findUserById(int id) {
+    public Mono<User> findUserById(int id) {
         return userRepository.findById(id);
     }
 
@@ -56,7 +58,7 @@ public class AuthService {
 
 
     public User login(LoginDto loginDto) {
-        User user = userRepository.findByEmail(loginDto.getEmail()).orElseThrow(() -> new UsernameNotFoundException("User not found"));
+        Mono<User> user = userRepository.findByEmail(loginDto.getEmail());
         if(!user.isEnabled()){
             throw new RuntimeException("email is not verified");
         }
@@ -65,49 +67,42 @@ public class AuthService {
     }
 
 
-    public void verifyEmail(VerifyDto verifyDto){
-        Optional<User> user = userRepository.findByEmail(verifyDto.getEmail());
-        
-        if (user.isPresent()) {
-            User _user = user.get();
-            
-            if (_user.getCodeExpiredAt().isBefore(LocalDateTime.now())) {
-                throw new RuntimeException("Verification code expired.");
-            }
-            
-            if (_user.getVerificationCode().equals(verifyDto.getVerificationCode())) {
-                _user.setIsVerified(true);
-                _user.setVerificationCode(null);
-                _user.setCodeExpiredAt(null);
-                userRepository.save(_user);
-            } else {
-                throw new RuntimeException("Invalid verification code.");
-            }
-        } else {
-            throw new RuntimeException("User not found.");
-        }
-        
+    public Mono<Void> verifyEmail(VerifyDto verifyDto){
+        return userRepository.findByEmail(verifyDto.getEmail())
+                .switchIfEmpty(Mono.error(new RuntimeException("user not found exception")))
+                .flatMap(user -> {
+                    if(user.getCodeExpiredAt().isBefore(LocalDateTime.now())){
+                        Mono.error(new RuntimeException("verification code expired"));
+                    }
+                    if(!user.getVerificationCode().equals(verifyDto.getVerificationCode())){
+                        Mono.error(new RuntimeException("Invalid verification code"));
+                    }
+                    user.setIsVerified(true);
+                    user.setVerificationCode(null);
+                    user.setCodeExpiredAt(null);
+                    return userRepository.save(user).then(Mono.empty());
+                });   
     }
-    public void resendCode(String email){
-        Optional<User> user = userRepository.findByEmail(email);
-        if (user.isPresent()) {
-            User _user = user.get();
-            if(_user.isEnabled()){
-                throw new RuntimeException("Account is already verified");
+    public Mono<Void> resendCode(String email){
+        return userRepository.findByEmail(email)
+        .switchIfEmpty(Mono.error(new RuntimeException("user not found exception")))
+        .flatMap(user -> {
+            if(user.isEnabled()){
+                Mono.error(new RuntimeException("Account is already verified"));
             }
-            _user.setVerificationCode(getVerificationCode());
-            _user.setCodeExpiredAt(LocalDateTime.now().plusMinutes(10));
-            emailService.send(email, buildVerificationEmail(email, _user.getVerificationCode()), "Verification Code");
-            userRepository.save(_user);
-        }else{
-            throw new RuntimeException("User not found exception");
-        }
-        
+            return Mono.just(user);
+        }).flatMap(user -> {
+            String code = getVerificationCode();
+            user.setVerificationCode(code);
+            user.setCodeExpiredAt(LocalDateTime.now().plusMinutes(10));
+            return emailService.send(email, buildVerificationEmail(email, code), "Verification Code").then(userRepository.save(user)).then();
+        });       
     }
 
     private String getVerificationCode(){
         Random random = new Random();
         int code = random.nextInt(900000)+100000;
+
         return String.valueOf(code);
     }
 

@@ -8,12 +8,16 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 
 @Service
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class EmailService implements EmailSender {
 
    
@@ -25,19 +29,20 @@ public class EmailService implements EmailSender {
 
     @Override
     @Async
-    public void send(String toEmail, String body,String subject) {
-        try {
-            MimeMessage mimeMessage = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "utf-8");
-            helper.setText(body, true);
-            helper.setSubject(subject);
-            helper.setFrom("n200072@rguktn.ac.in");
-            helper.setTo(toEmail);
-            mailSender.send(mimeMessage);
-        } catch (Exception e) {
-            LOGGER.error("falied to send email", e);
-            throw new IllegalStateException("faliled to send email");
-        }
+    public Mono<Void> send(String toEmail, String body,String subject) {
+        return Mono.fromRunnable(() -> {
+                try {
+                    MimeMessage mimeMessage = mailSender.createMimeMessage();
+                    MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "utf-8");
+                    helper.setText(body, true);
+                    helper.setSubject(subject);
+                    helper.setFrom("n200072@rguktn.ac.in");
+                    helper.setTo(toEmail);
+                    mailSender.send(mimeMessage); // This is a blocking operation
+                } catch (MessagingException e) {
+                    throw new RuntimeException("Failed to send email", e);
+                }
+    }).subscribeOn(Schedulers.boundedElastic()).then();
     }
 
 }

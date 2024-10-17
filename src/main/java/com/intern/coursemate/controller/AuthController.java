@@ -32,6 +32,8 @@ import jakarta.validation.Valid;
 import com.intern.coursemate.service.AuthService;
 
 import lombok.RequiredArgsConstructor;
+import reactor.core.publisher.Mono;
+
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -69,7 +71,7 @@ public class AuthController {
             String email = payload.getEmail();
             boolean emailVerified = Boolean.valueOf(payload.getEmailVerified());
             String name = (String) payload.get("name");
-            Optional<User> user = userRepository.findByEmail(email);
+            Mono<User> user = userRepository.findByEmail(email);
             User _user;
             if(!user.isPresent()){
                 _user = User.builder().email(email).name(name).isVerified(emailVerified).build();

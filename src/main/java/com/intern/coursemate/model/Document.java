@@ -1,37 +1,30 @@
 package com.intern.coursemate.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 
-import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.relational.core.mapping.Table;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-@Entity
 @Getter
 @Setter
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name = "document",uniqueConstraints = @UniqueConstraint(name = "url",columnNames = "url"))
+@Table("document")
 public class Document {
     @Id
-    @GeneratedValue
     private int id;
     private String name;
     private String subject;
     private String year;
     private int sem;
-    @ManyToOne
-    @JoinColumn(name = "user_id")
-    private User user;
+    // foreign key reference
+    private int userId;
     private boolean isVerified;
     private String url;
 }

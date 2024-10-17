@@ -5,9 +5,12 @@ package com.intern.coursemate.exception;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.InsufficientAuthenticationException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -56,11 +59,15 @@ public class ApiExceptionHandler {
         }else if ( ex instanceof BadCredentialsException){
              errorDetail= ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(400), ex.getMessage());
             errorDetail.setProperty("Reason", "some thing went Wrong");
-            errorDetail.setProperty("Reason", "some thing went Wrong");
         }else if ( ex instanceof TokenExpired){
              errorDetail= ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(400), ex.getMessage());
             errorDetail.setProperty("Reason", "some thing went Wrong");
-            errorDetail.setProperty("Reason", "some thing went Wrong");
+        }else if ( ex instanceof HttpMessageNotReadableException){
+             errorDetail= ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(400), ex.getMessage());
+            errorDetail.setProperty("Reason", "Must pass required paramaters");
+        }else if ( ex instanceof InsufficientAuthenticationException){
+             errorDetail= ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(403), ex.getMessage());
+            errorDetail.setProperty("Reason", "must be authenticated");
         }
         return errorDetail;
     }

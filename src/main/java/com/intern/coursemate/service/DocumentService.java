@@ -1,6 +1,5 @@
 package com.intern.coursemate.service;
 
-import org.apache.tomcat.util.http.fileupload.FileUploadException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -10,43 +9,52 @@ import com.amazonaws.AmazonServiceException;
 import com.amazonaws.SdkClientException;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.amazonaws.services.s3.model.PutObjectRequest;
-import com.amazonaws.services.s3.model.S3Object;
-import com.amazonaws.services.s3.model.S3ObjectInputStream;
-import com.amazonaws.util.IOUtils;
+import com.intern.coursemate.dao.DocumentRepository;
+import com.intern.coursemate.dao.UserRepository;
+import com.intern.coursemate.model.Document;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.io.*;
+import java.nio.file.FileSystemException;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class DocumentService {
     
     @Value("${appilication.bucket.name}")
     private String bucketName;
 
+    private final UserRepository userRepository;
+    private final DocumentRepository documentRepository;
+
     @Autowired
     private AmazonS3 s3Client;
 
 
-    public String uploadFile(MultipartFile multipartFile) throws AmazonServiceException, SdkClientException, IOException {
-        String fileName = System.currentTimeMillis() + "_" + multipartFile.getOriginalFilename();
-        try {
+    public Mono<String> uploadFile(MultipartFile multipartFile) {
+        return Mono.fromCallable(() -> {
+            String fileName = System.currentTimeMillis() + "_" + multipartFile.getOriginalFilename();
             ObjectMetadata objectMetadata = new ObjectMetadata();
             objectMetadata.setContentType(multipartFile.getContentType());
             objectMetadata.setContentLength(multipartFile.getSize());
             s3Client.putObject(bucketName, fileName, multipartFile.getInputStream(), objectMetadata);
-            return  fileName;
-        } catch (Exception e) {
-            log.error("Error occurred ==> {}", e.getMessage());
-            throw new FileUploadException("Error occurred in file upload ==> "+e.getMessage());
-        }
+            return fileName;
+        }).onErrorResume(e ->  Mono.error(new FileSystemException("Error occurred in file upload ==> "+e.getMessage())));
+        
     }
 
-    public String deleteFile(String fileName) {
-        s3Client.deleteObject(bucketName, fileName);
-        return fileName + " removed ...";
+    public Mono<String> deleteFile(String fileName) {
+        return Mono.fromRunnable(() -> s3Client.deleteObject(bucketName,fileName)).thenReturn(fileName + " removed ...");
+    }
+
+    public Flux<Document> getDocumentsByUserEmail(String email) {
+        return userRepository.findByEmail(email)
+                .flatMapMany(user -> documentRepository.findByUserId(user.getId()));
     }
     
 

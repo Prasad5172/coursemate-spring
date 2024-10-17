@@ -7,6 +7,8 @@ import com.intern.coursemate.model.User;
 import com.intern.coursemate.service.UserService;
 
 import lombok.AllArgsConstructor;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,16 +26,18 @@ public class UsersController {
     private final  UserService userService;
 
     @GetMapping("/me")
-    public ResponseEntity<User> authenticateUser() {
+    public ResponseEntity<Mono<User>> authenticateUser() {
         System.out.println("users/me");
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        User authenticateUser = (User) authentication.getPrincipal();
+        Mono<User authenticateUser = (User) authentication.getPrincipal();
         return ResponseEntity.ok(authenticateUser);
     }
+    
     @GetMapping("/")
-    public ResponseEntity<List<User>> allUsers() {
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Flux<User>> allUsers() {
         System.out.println("users");
-        List<User> users = userService.allUser();
+        Flux<User> users = userService.allUser();
         return ResponseEntity.ok(users);
     }
     

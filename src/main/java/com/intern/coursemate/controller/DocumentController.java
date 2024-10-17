@@ -10,6 +10,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,11 +26,14 @@ import com.amazonaws.SdkClientException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intern.coursemate.dao.DocumentRepository;
 import com.intern.coursemate.email.EmailService;
+import com.intern.coursemate.exception.CustomException;
 import com.intern.coursemate.model.Document;
 import com.intern.coursemate.request.DocumentRequest;
 import com.intern.coursemate.service.DocumentService;
 
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 @RestController
 @RequestMapping("/docs")
@@ -40,54 +44,76 @@ public class DocumentController {
     private DocumentService documentService;
 
     @Autowired
-    private DocumentRepository documentRespositry;
+    private DocumentRepository documentRepository;
 
     @Autowired
     private EmailService emailService;
     
 
     @PostMapping("/upload")
-    public ResponseEntity<String> uploadFile( @RequestParam("file") MultipartFile file,
-    @RequestParam("documentRequest") String documentRequestJson ) throws AmazonServiceException, SdkClientException, IOException {
+    public Mono<ResponseEntity<String>> uploadFile( @RequestParam("file") MultipartFile file,@RequestParam("documentRequest") String documentRequestJson ) {
         ObjectMapper objectMapper = new ObjectMapper();
-        DocumentRequest documentRequest = objectMapper.readValue(documentRequestJson, DocumentRequest.class);
-        log.info("Upload request for subject: {}, year: {}, semester: {}", 
-        documentRequest.getSubject(), documentRequest.getYear(), documentRequest.getSem());
+        return Mono.fromCallable(() -> objectMapper.readValue(documentRequestJson, DocumentRequest.class))
+        .flatMap(documentRequest -> {
+            return documentService.uploadFile(file)
+                .flatMap(fileName -> {
+                    String fileUrl = "https://rguktcoursemate.s3.eu-north-1.amazonaws.com/" + fileName;
+                    Document document = Document.builder()
+                            .name(fileName)
+                            .sem(documentRequest.getSem())
+                            .year(documentRequest.getYear())
+                            .subject(documentRequest.getSubject())
+                            .url(fileUrl)
+                            .build();
+                    return documentRepository.save(document)
+                        .flatMap(savedDocument -> {
+                            // Send the email reactively
+                            String verifyUrl = "http://localhost:8080/docs/verify?id=" + savedDocument.getId();
+                            String rejectUrl = "http://localhost:8080/docs/reject?id=" + savedDocument.getId() + "&name=" + fileName;
 
-        // Handle the file upload
-        String fileName = documentService.uploadFile(file);
-        String fileUrl = "https://rguktcoursemate.s3.eu-north-1.amazonaws.com/" + fileName;
-        Document document = Document.builder().name(fileName).sem(documentRequest.getSem()).year(documentRequest.getYear()).subject(documentRequest.getSubject()).url(fileUrl).build();
-        documentRespositry.save(document);
-        emailService.send("n200072@rguktn.ac.in",buildDocumentEmail(fileName, fileUrl, "http://localhost:8080/docs/verify?id="+document.getId() , "http://localhost:8080/docs/reject?id="+document.getId()+"&name="+fileName), "Verify document");
-        return new ResponseEntity<>(fileUrl, HttpStatus.OK);
-    }
+                            return emailService.send("n200072@rguktn.ac.in", 
+                                                     buildDocumentEmail(fileName, fileUrl, verifyUrl, rejectUrl), 
+                                                     "Verify document")
+                                .thenReturn(new ResponseEntity<>(fileUrl, HttpStatus.OK));
+                        });
+                });
+        })
+        .onErrorResume(IOException.class, e -> {
+            log.error("IOException occurred during file upload: {}", e.getMessage());
+            return Mono.just(new ResponseEntity<>("File upload failed due to an IO error: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR));
+        })
+        .onErrorResume(e -> {
+            log.error("Error occurred during file upload: {}", e.getMessage());
+            return Mono.just(new ResponseEntity<>("File upload failed: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR));
+        });
+}
 
     @GetMapping("/fetch")
-    public List<Document> getMethodName(@RequestBody Document document) {
-        List<Document> documents = documentRespositry.fetchDocumentsByQuery(document.getYear(),document.getSem(), document.getSubject());
-        return documents;
+    public Flux<Document> getMethodName(@RequestBody Document document) {
+        return  documentRepository.fetchDocumentsByQuery(document.getYear(),document.getSem(), document.getSubject());
     }
 
     @GetMapping("/verify")
-    public String verify(@RequestParam("id") int id) {
-        Optional<Document> document = documentRespositry.findById(id);
-        document.ifPresent(doc -> {
-            doc.setVerified(true);  // Assuming there's a setter for isVerified
-            documentRespositry.save(doc);  // Save the updated document
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<String> verify(@RequestParam("id") int id) {
+        return documentRepository.findById(id).switchIfEmpty(Mono.error(new CustomException("Document with ID " + id + " not found")))
+        .flatMap(doc -> {
+            doc.setVerified(true);
+            return documentRepository.save(doc).thenReturn("verified");
         });
-        return "verified";
+        
     }
     @GetMapping("/reject")
-    public String reject(@RequestParam("id") String id) {
-        Optional<Document> document = documentRespositry.findById(Integer.parseInt(id));
-        document.ifPresent(docu -> {
-            emailService.send("prasadpadala2005@gmail.com", buildRejectionEmail(docu.getName(), docu.getUrl(), "", docu.getSem(), docu.getYear(), docu.getSubject()) , "Document Rejected");
-            // documentService.deleteFile(docu.getName());
-            documentRespositry.deleteById(docu.getId());
-        });
-        // need to send email to the document uploader
-        return "delete";
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<ResponseEntity<String>> reject(@RequestParam("id") String id) {
+        return documentRepository.findById(Integer.parseInt(id))
+                .switchIfEmpty(Mono.error(new CustomException("Document with ID " + id + " not found")))
+                .flatMap(docu -> 
+                    emailService.send("prasadpadala2005@gmail.com", buildRejectionEmail(docu.getName(), docu.getUrl(), "", docu.getSem(), docu.getYear(), docu.getSubject()) , "Document Rejected")
+                    .then(documentRepository.delete(docu))
+                    .thenReturn(ResponseEntity.status(HttpStatus.OK).body("deleted"))
+                ).onErrorResume(e -> Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("An error occurred: " + e.getMessage())));   
     }
 
     private String buildDocumentEmail(String documentName, String documentUrl, String verificationLink, String rejectionLink) {
