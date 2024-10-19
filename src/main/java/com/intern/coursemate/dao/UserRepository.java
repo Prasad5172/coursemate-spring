@@ -1,6 +1,5 @@
 package com.intern.coursemate.dao;
 
-import org.springframework.data.repository.CrudRepository;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import org.springframework.stereotype.Repository;
 
