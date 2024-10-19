@@ -10,7 +10,6 @@ import org.springframework.stereotype.Service;
 
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
-import lombok.AllArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -20,15 +19,9 @@ import reactor.core.scheduler.Schedulers;
 @RequiredArgsConstructor
 public class EmailService implements EmailSender {
 
-   
-
-    private final static Logger LOGGER = LoggerFactory
-            .getLogger(EmailService.class);
-
     private final JavaMailSender mailSender;
 
     @Override
-    @Async
     public Mono<Void> send(String toEmail, String body,String subject) {
         return Mono.fromRunnable(() -> {
                 try {

@@ -6,65 +6,79 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.ReactiveUserDetailsService;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.web.filter.OncePerRequestFilter;
-import org.springframework.web.servlet.HandlerExceptionResolver;
+import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.server.WebFilter;
+import org.springframework.web.server.WebFilterChain;
 
 import com.intern.coursemate.service.JwtService;
 
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import reactor.core.publisher.Mono;
+
+
 
 
 @Configuration
-public class JwtFilter extends OncePerRequestFilter {
-
-    @Autowired
-    private HandlerExceptionResolver handlerExceptionResolver;
+public class JwtFilter implements WebFilter {
 
     @Autowired
     private JwtService jwtService;
 
     @Autowired
-    private UserDetailsService userDetailsService;
+    private ReactiveUserDetailsService userDetailsService;
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
-            throws ServletException, IOException {
-        String path = request.getRequestURI();
-        if (path.startsWith("/auth/")) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-        System.out.println("dofilter");
-        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
-        String token = null;
-        String username = null;
-        try {
-            if(authHeader != null && authHeader.startsWith("Bearer ")){
-                token = authHeader.substring(7);
-                username = jwtService.extractUserName(token);
-            }   
-            if(username != null && SecurityContextHolder.getContext().getAuthentication() == null){
-                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-                if(jwtService.isTokenValid(token, userDetails)) {
-                    UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(userDetails, null,userDetails.getAuthorities());
-                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(authToken);
-                
-                }
-            }
-            filterChain.doFilter(request,response);
-        } catch (Exception e) {
-            handlerExceptionResolver.resolveException(request,response,null,e);
+public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+    String path = exchange.getRequest().getURI().getPath();
+
+    // Allow requests to "/auth/**" without filtering
+    if (path.startsWith("/auth/")) {
+        return chain.filter(exchange);
+    }
+
+    // Get Authorization header
+    String authHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+
+    // Extract token if the Authorization header starts with "Bearer "
+    final String token = (authHeader != null && authHeader.startsWith("Bearer ")) ? authHeader.substring(7) : null;
+
+    // If token is present, extract the username
+    if (token != null) {
+        String username = jwtService.extractUserName(token); // Extract the username from JWT
+
+        if (username != null) {
+            // Use ReactiveUserDetailsService to fetch the user reactively
+            return userDetailsService.findByUsername(username)
+                .flatMap(userDetails -> {
+                    // Validate the token with the user details
+                    if (jwtService.isTokenValid(token, userDetails)) {
+                        // Create authentication token
+                        UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                                userDetails, null, userDetails.getAuthorities());
+
+                        // Set authentication in reactive security context and proceed with the filter chain
+                        return chain.filter(exchange)
+                                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authToken));
+                    }
+                    // If the token is invalid, continue without setting the authentication
+                    return chain.filter(exchange);
+                })
+                .onErrorResume(e -> {
+                    // Handle any exceptions reactively
+                    return Mono.error(e);
+                });
         }
     }
 
+    // If no valid token or username, proceed without authentication
+    return chain.filter(exchange);
+}
 }
 
 

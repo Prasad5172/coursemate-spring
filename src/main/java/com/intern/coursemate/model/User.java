@@ -29,7 +29,7 @@ import lombok.Setter;
 @Table("users")
 public class User implements UserDetails {
     @Id
-    private int id;
+    private long id;
     private String name;
     private String email;
     private String password;
@@ -42,7 +42,6 @@ public class User implements UserDetails {
     @Default
     private Boolean isAdmin = false;
     
-    // private List<Document> documents;
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

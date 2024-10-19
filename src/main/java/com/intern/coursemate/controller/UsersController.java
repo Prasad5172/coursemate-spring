@@ -10,14 +10,14 @@ import lombok.AllArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 
 
-import java.util.*;
 
 @RestController
 @RequestMapping("/users")
@@ -26,25 +26,29 @@ public class UsersController {
     private final  UserService userService;
 
     @GetMapping("/me")
-    public ResponseEntity<Mono<User>> authenticateUser() {
-        System.out.println("users/me");
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        Mono<User authenticateUser = (User) authentication.getPrincipal();
-        return ResponseEntity.ok(authenticateUser);
-    }
+public Mono<ResponseEntity<User>> authenticateUser() {
+    return ReactiveSecurityContextHolder.getContext()
+        .map(securityContext -> {
+            Authentication authentication = securityContext.getAuthentication();
+            User authenticatedUser = (User) authentication.getPrincipal();
+            return ResponseEntity.ok(authenticatedUser);  
+        })
+        .defaultIfEmpty(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());  // Handle unauthenticated cases
+}
+
     
-    @GetMapping("/")
+    @GetMapping({"","/"})
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Flux<User>> allUsers() {
-        System.out.println("users");
+    public Mono<ResponseEntity<Flux<User>>> allUsers() {
+        System.out.println("Fetching all users");
         Flux<User> users = userService.allUser();
-        return ResponseEntity.ok(users);
+        return Mono.just(ResponseEntity.ok(users)); // Wrap the Flux in a ResponseEntity and return as Mono
     }
     
     @GetMapping("/admin")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<String> adminEndpoint() {
-        return ResponseEntity.ok("Admin access granted.");
+    public Mono<ResponseEntity<String>> adminEndpoint() {
+        return Mono.just(ResponseEntity.ok("Admin access granted."));
     }
 
 }

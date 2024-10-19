@@ -7,6 +7,7 @@ import java.util.Random;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.security.saml2.Saml2RelyingPartyProperties.AssertingParty.Verification;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.ReactiveAuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -22,7 +23,6 @@ import com.intern.coursemate.model.User;
 
 import reactor.core.publisher.Mono;
 
-import java.util.*;
 @Service
 public class AuthService {
 
@@ -34,7 +34,7 @@ public class AuthService {
     private EmailService emailService;
 
     @Autowired
-    private AuthenticationManager authenticationManager;
+    private ReactiveAuthenticationManager authenticationManager;
     
     public Mono<User> findUserById(int id) {
         return userRepository.findById(id);
@@ -42,28 +42,45 @@ public class AuthService {
 
     
 
-    public User signup(UserDto user){
-        try {
-            
-            User newUser = User.builder().name(user.getName()).email(user.getEmail()).password(passwordEncoder.encode(user.getPassword())).build();
-            newUser.setVerificationCode(getVerificationCode());
-            newUser.setCodeExpiredAt(LocalDateTime.now().plusMinutes(15));
-            userRepository.save(newUser);
-            emailService.send(user.getEmail(), buildVerificationEmail(user.getEmail(), newUser.getVerificationCode()), "Verification" );
-            return newUser;
-        } catch (Exception e) {
-            throw new RuntimeException(e.getMessage());
-        }
+    public Mono<User> signup(UserDto user) {
+        return Mono.just(user)
+            .map(userDto -> {
+                // Build the User entity from the DTO
+                User newUser = User.builder()
+                        .name(userDto.getName())
+                        .email(userDto.getEmail())
+                        .password(passwordEncoder.encode(userDto.getPassword()))
+                        .build();
+                newUser.setVerificationCode(getVerificationCode());
+                newUser.setCodeExpiredAt(LocalDateTime.now().plusMinutes(15));
+                return newUser;
+            })
+            .flatMap(userRepository::save) // Save the user reactively
+            .flatMap(savedUser -> emailService.send(
+                    savedUser.getEmail(),
+                    buildVerificationEmail(savedUser.getEmail(), savedUser.getVerificationCode()), 
+                    "Verification"
+                ).thenReturn(savedUser) // Send the email and return the saved user
+            )
+            .onErrorMap(e -> new RuntimeException(e.getMessage())); // Handle any errors
     }
+    
 
 
-    public User login(LoginDto loginDto) {
-        Mono<User> user = userRepository.findByEmail(loginDto.getEmail());
-        if(!user.isEnabled()){
-            throw new RuntimeException("email is not verified");
-        }
-        Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(loginDto.getEmail(), loginDto.getPassword()));
-        return user;
+    public Mono<User> login(LoginDto loginDto) {
+        return  userRepository.findByEmail(loginDto.getEmail())
+                .switchIfEmpty(Mono.error(new RuntimeException("user not found with email")))
+                .flatMap(user -> {
+                    if(!user.isEnabled()){
+                        return Mono.error(new RuntimeException("email is not verified"));
+                    }
+                    UsernamePasswordAuthenticationToken authToken = 
+                        new UsernamePasswordAuthenticationToken(loginDto.getEmail(), loginDto.getPassword());
+                    return Mono.fromCallable(() -> authenticationManager.authenticate(authToken))
+                    .onErrorResume(e -> Mono.error(new RuntimeException("Invalid credentials")))
+                    .map(authentication -> user); // Return the user after successful authentication
+                });
+               
     }
 
 

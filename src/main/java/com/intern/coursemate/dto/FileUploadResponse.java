@@ -1,6 +1,7 @@
 package com.intern.coursemate.dto;
 
-import org.joda.time.LocalDateTime;
+
+import java.time.LocalDateTime;
 
 import lombok.Data;
 

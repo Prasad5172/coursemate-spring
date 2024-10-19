@@ -11,9 +11,9 @@ import reactor.core.publisher.Flux;
 
 @Repository
 public interface DocumentRepository extends ReactiveCrudRepository<Document,Integer> {
-    @Query(" SELECT d from Document d where d.sem = :sem and d.year = :year and d.subject = :subject")
+    @Query("SELECT * FROM document WHERE sem = :sem AND year = :year AND subject = :subject")
     Flux<Document> fetchDocumentsByQuery(String year,int sem,String subject);
-    Flux<Document> findByUserId(int userId);
-    Flux<Document> findByUserId(int userId, Pageable pageable);
+    Flux<Document> findByUserId(long userId);
+    Flux<Document> findByUserId(long userId, Pageable pageable);
 }
 

@@ -1,6 +1,5 @@
 package com.intern.coursemate.request;
 
-import org.antlr.v4.runtime.misc.NotNull;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

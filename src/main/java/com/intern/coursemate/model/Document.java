@@ -24,7 +24,7 @@ public class Document {
     private String year;
     private int sem;
     // foreign key reference
-    private int userId;
+    private long userId;
     private boolean isVerified;
     private String url;
 }

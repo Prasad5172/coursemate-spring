@@ -1,28 +1,23 @@
 package com.intern.coursemate.controller;
 
-import java.io.IOException;
-import java.lang.StackWalker.Option;
-import java.util.List;
-import java.util.Optional;
-
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.amazonaws.AmazonServiceException;
-import com.amazonaws.SdkClientException;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intern.coursemate.dao.DocumentRepository;
 import com.intern.coursemate.email.EmailService;
@@ -30,7 +25,9 @@ import com.intern.coursemate.exception.CustomException;
 import com.intern.coursemate.model.Document;
 import com.intern.coursemate.request.DocumentRequest;
 import com.intern.coursemate.service.DocumentService;
+import com.intern.coursemate.service.JwtService;
 
+import io.jsonwebtoken.io.IOException;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -48,45 +45,84 @@ public class DocumentController {
 
     @Autowired
     private EmailService emailService;
+
+    @Autowired
+    private JwtService jwtService;
     
 
     @PostMapping("/upload")
-    public Mono<ResponseEntity<String>> uploadFile( @RequestParam("file") MultipartFile file,@RequestParam("documentRequest") String documentRequestJson ) {
-        ObjectMapper objectMapper = new ObjectMapper();
-        return Mono.fromCallable(() -> objectMapper.readValue(documentRequestJson, DocumentRequest.class))
-        .flatMap(documentRequest -> {
-            return documentService.uploadFile(file)
-                .flatMap(fileName -> {
-                    String fileUrl = "https://rguktcoursemate.s3.eu-north-1.amazonaws.com/" + fileName;
-                    Document document = Document.builder()
-                            .name(fileName)
-                            .sem(documentRequest.getSem())
-                            .year(documentRequest.getYear())
-                            .subject(documentRequest.getSubject())
-                            .url(fileUrl)
-                            .build();
-                    return documentRepository.save(document)
-                        .flatMap(savedDocument -> {
-                            // Send the email reactively
-                            String verifyUrl = "http://localhost:8080/docs/verify?id=" + savedDocument.getId();
-                            String rejectUrl = "http://localhost:8080/docs/reject?id=" + savedDocument.getId() + "&name=" + fileName;
+    public Mono<ResponseEntity<String>> uploadFile(
+        @RequestHeader("Authorization") String authorizationHeader,
+            @RequestPart("file") Mono<FilePart> filePartMono,
+            @RequestPart("documentRequest") Mono<String> documentRequestJsonMono) {
 
-                            return emailService.send("n200072@rguktn.ac.in", 
-                                                     buildDocumentEmail(fileName, fileUrl, verifyUrl, rejectUrl), 
-                                                     "Verify document")
-                                .thenReturn(new ResponseEntity<>(fileUrl, HttpStatus.OK));
-                        });
+            // Extract JWT token from the Authorization header
+            String token = authorizationHeader.replace("Bearer ", "");
+            
+            // Extract the userId from the token
+            Long userId;
+            try {
+                userId = jwtService.extractUserId(token);
+            } catch (Exception e) {
+                return Mono.error(new RuntimeException("Invalid JWT token"));
+            }
+    
+        return documentRequestJsonMono
+                .flatMap(documentRequestJson -> {
+                    // Deserialize the JSON string to DocumentRequest object
+                    ObjectMapper objectMapper = new ObjectMapper();
+                    DocumentRequest documentRequest;
+                    try {
+                        documentRequest = objectMapper.readValue(documentRequestJson, DocumentRequest.class);
+                    } catch (IOException e) {
+                        return Mono.error(new RuntimeException("Invalid document request JSON"));
+                    } catch (JsonMappingException e1) {
+                        return Mono.error(new RuntimeException("Invalid document request JSON"));
+                    } catch (JsonProcessingException e1) {
+                        return Mono.error(new RuntimeException("Invalid document request JSON"));
+                    }
+                    // Handle file upload and save the document in the database
+                    return filePartMono
+                            .flatMap(filePart -> {
+                                // Upload the file asynchronously
+                                return documentService.uploadFile(filePart)
+                                        .flatMap(fileName -> {
+                                            // Construct file URL and save the document
+                                            String fileUrl = "https://rguktcoursemate.s3.eu-north-1.amazonaws.com/" + fileName;
+                                            Document document = Document.builder()
+                                                    .name(fileName)
+                                                    .sem(documentRequest.getSem())
+                                                    .year(documentRequest.getYear())
+                                                    .subject(documentRequest.getSubject())
+                                                    .userId(userId)
+                                                    .url(fileUrl)
+                                                    .build();
+                                             Mono<Document>  savedDocumentMono = documentRepository.save(document);
+                                            Mono<Void> sendEmailMono = savedDocumentMono.flatMap(savedDocument -> 
+                                            emailService.send(
+                                                "n200072@rguktn.ac.in",
+                                                buildDocumentEmail(fileName, fileUrl,
+                                                        "http://localhost:8080/docs/verify?id=" + savedDocument.getId(),
+                                                        "http://localhost:8080/docs/reject?id=" + savedDocument.getId() + "&name=" + fileName),
+                                                "Verify document"
+                                            )
+                                        );
+                                        sendEmailMono.subscribe();
+                                        return Mono.when(
+                                            // sendEmailMono,
+                                            savedDocumentMono
+                                            )
+                                .thenReturn(ResponseEntity.ok(fileUrl));                                            
+                                        });
+                            });
+                })
+                .onErrorResume(e -> {
+                    log.error("Error occurred: {}", e.getMessage());
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to upload the document"));
                 });
-        })
-        .onErrorResume(IOException.class, e -> {
-            log.error("IOException occurred during file upload: {}", e.getMessage());
-            return Mono.just(new ResponseEntity<>("File upload failed due to an IO error: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR));
-        })
-        .onErrorResume(e -> {
-            log.error("Error occurred during file upload: {}", e.getMessage());
-            return Mono.just(new ResponseEntity<>("File upload failed: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR));
-        });
-}
+    }
+    
+
 
     @GetMapping("/fetch")
     public Flux<Document> getMethodName(@RequestBody Document document) {
@@ -105,16 +141,46 @@ public class DocumentController {
     }
     @GetMapping("/reject")
     @PreAuthorize("hasRole('ADMIN')")
-    public Mono<ResponseEntity<String>> reject(@RequestParam("id") String id) {
+    public Mono<ResponseEntity<String>> reject(
+            @RequestParam("id") String id,
+            @RequestHeader("Authorization") String authorizationHeader) {
+        String token = authorizationHeader.replace("Bearer ", "");
+
+        // Extract the userId from the token
+        String toEmail;
+        try {
+            toEmail = jwtService.extractUserName(token);
+            System.out.println(toEmail);
+        } catch (Exception e) {
+            return Mono.error(new RuntimeException("Invalid JWT token"));
+        }
         return documentRepository.findById(Integer.parseInt(id))
                 .switchIfEmpty(Mono.error(new CustomException("Document with ID " + id + " not found")))
-                .flatMap(docu -> 
-                    emailService.send("prasadpadala2005@gmail.com", buildRejectionEmail(docu.getName(), docu.getUrl(), "", docu.getSem(), docu.getYear(), docu.getSubject()) , "Document Rejected")
-                    .then(documentRepository.delete(docu))
-                    .thenReturn(ResponseEntity.status(HttpStatus.OK).body("deleted"))
-                ).onErrorResume(e -> Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("An error occurred: " + e.getMessage())));   
+                .flatMap(document -> {
+                    // Create a Mono for sending the email
+                    Mono<Void> sendEmailMono = emailService.send(toEmail, buildRejectionEmail(document.getName(), document.getUrl(), "", document.getSem(), document.getYear(), document.getSubject()) , "Document Rejected").then();
+                    
+                    // Call the document service (assume it's an asynchronous operation returning
+                    // Mono)
+                    Mono<String> documentServiceCallMono = documentService.deleteFile(document.getName());
+                    // Create a Mono for deleting the document
+                    Mono<Void> deleteDocumentMono = documentRepository.delete(document);
+                    sendEmailMono.subscribe();
+                    // Combine both tasks using Mono.zip or Mono.when
+                    return Mono.when(
+                        // sendEmailMono, 
+                        documentServiceCallMono,
+                        deleteDocumentMono
+                         )
+                            .then(Mono.just(
+                                    ResponseEntity.status(HttpStatus.OK).body("Document deleted and email sent")));
+                })
+                .onErrorResume(e -> Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body("An error occurred: " + e.getMessage())));
     }
+            
+            
+            
 
     private String buildDocumentEmail(String documentName, String documentUrl, String verificationLink, String rejectionLink) {
         return "<div style=\"font-family:Helvetica,Arial,sans-serif;font-size:16px;margin:0;color:#0b0c0c\">\n" +
